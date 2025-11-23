@@ -322,6 +322,47 @@ def print_backtest_results(df_trades: pd.DataFrame, investment_per_trade: int, s
         print(f"  Total Profit: {strat_profit_amount:,.0f} JPY")
         print(f"  Profit Factor: {strat_profit_factor:.2f}x")
 
+    # Monthly breakdown
+    print("\n" + "="*80)
+    print("MONTHLY PERFORMANCE")
+    print("="*80)
+    
+    df_trades['entry_date'] = pd.to_datetime(df_trades['entry_date'])
+    df_trades['month'] = df_trades['entry_date'].dt.to_period('M')
+
+    monthly = df_trades.groupby('month').agg({
+        'profit_amount': ['count', 'sum'],
+        'profit_pct': 'sum'
+    })
+    
+    # Calculate wins per month
+    monthly['wins'] = df_trades[df_trades['profit_pct'] > 0].groupby('month')['profit_amount'].count()
+    monthly['wins'] = monthly['wins'].fillna(0)
+
+    for period in monthly.index:
+        count = int(monthly.loc[period, ('profit_amount', 'count')])
+        total_profit = monthly.loc[period, ('profit_amount', 'sum')]
+        wins = int(monthly.loc[period, 'wins'])
+        win_rate = wins / count * 100 if count > 0 else 0
+        
+        print(f"  {period}: {count:3d} trades, {total_profit:>12,.0f} JPY, Win: {win_rate:5.1f}%")
+
+    # Annual outlook
+    print("\n" + "="*80)
+    print("ANNUAL OUTLOOK")
+    print("="*80)
+    
+    df_trades['year'] = df_trades['entry_date'].dt.year
+    yearly = df_trades.groupby('year')['profit_amount'].sum()
+
+    for year in yearly.index:
+        print(f"  {year}: {yearly[year]:,.0f} JPY")
+
+    avg_annual = yearly.mean()
+    print(f"\n  Average Annual Profit: {avg_annual:,.0f} JPY")
+    print(f"  Average Monthly Profit: {avg_annual/12:,.0f} JPY")
+
+
 
 def _test_strategy_combination(strategies: List[str], refresh: bool, investment_per_trade: int,
                                verbose: bool = True) -> Optional[Dict[str, Any]]:
