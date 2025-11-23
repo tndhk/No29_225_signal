@@ -1,10 +1,10 @@
 import pandas as pd
+import pandas_ta as ta
 from tqdm import tqdm
 import datetime
 from typing import List, Dict, Any
 import argparse
 from . import config, data_loader, screener
-from . import indicators as ta
 import os
 from itertools import combinations
 
@@ -61,7 +61,8 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000,
         df = screener.add_indicators(df)
 
         # Iterate through days
-        start_idx = config.MA_LONG + 1
+        # Ensure enough lookback for all indicators
+        start_idx = max(config.MA_LONG, config.STRATEGY_A_BB_PERIOD, config.STRATEGY_B_LOW_PERIOD, 35) + 1
 
         # Track active trades (one per strategy)
         active_trades = {}  # {strategy_name: trade_dict}
@@ -138,12 +139,14 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000,
                 del active_trades[strategy_name]
 
             # --- Look for New Signals ---
-            # Market Filter: Check if Nikkei 225 is uptrending
+            # Market Filter: Check if Nikkei 225 is uptrending (SMA75)
             market_ok = True
             if market_df is not None:
                 try:
-                    if current_date in market_df.index:
-                        market_row = market_df.loc[current_date]
+                    # asof to get the latest available market data on or before current_date
+                    idx = market_df.index.asof(current_date)
+                    if not pd.isna(idx):
+                        market_row = market_df.loc[idx]
                         if not pd.isna(market_row['SMA75']):
                             if market_row['Close'] < market_row['SMA75']:
                                 market_ok = False
@@ -304,12 +307,15 @@ def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 
             win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
             avg_profit = df_trades['profit_pct'].mean() * 100
             total_return = df_trades['profit_pct'].sum() * 100
-            total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+            
+            if 'profit_amount' not in df_trades.columns:
+                 df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
+            total_profit = df_trades['profit_amount'].sum()
 
             wins_df = df_trades[df_trades['result'] == 'WIN']
             losses_df = df_trades[df_trades['result'] == 'LOSS']
-            total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
-            total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+            total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
+            total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
             profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
 
             results_summary.append({
@@ -340,12 +346,15 @@ def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 
             win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
             avg_profit = df_trades['profit_pct'].mean() * 100
             total_return = df_trades['profit_pct'].sum() * 100
-            total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+            
+            if 'profit_amount' not in df_trades.columns:
+                 df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
+            total_profit = df_trades['profit_amount'].sum()
 
             wins_df = df_trades[df_trades['result'] == 'WIN']
             losses_df = df_trades[df_trades['result'] == 'LOSS']
-            total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
-            total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+            total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
+            total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
             profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
 
             results_summary.append({
@@ -374,12 +383,15 @@ def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 
         win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
         avg_profit = df_trades['profit_pct'].mean() * 100
         total_return = df_trades['profit_pct'].sum() * 100
-        total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+        
+        if 'profit_amount' not in df_trades.columns:
+             df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
+        total_profit = df_trades['profit_amount'].sum()
 
         wins_df = df_trades[df_trades['result'] == 'WIN']
         losses_df = df_trades[df_trades['result'] == 'LOSS']
-        total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
-        total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+        total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
+        total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
         profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
 
         results_summary.append({

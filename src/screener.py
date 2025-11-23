@@ -159,12 +159,17 @@ def check_signal_momentum_breakout(ticker: str, row: pd.Series, prev_row: pd.Ser
     if row['Close'] <= row['SMA75']:
         return None
 
-    # RSI filter: strong momentum (60-80)
+    # Perfect Order filter: SMA25 > SMA75 (confirming strong uptrend)
+    if row['SMA25'] <= row['SMA75']:
+        return None
+
+    # Medium-term trend: 25-day SMA must be rising
     if not (config.STRATEGY_A_RSI_LOWER <= row['RSI14'] < config.STRATEGY_A_RSI_UPPER):
         return None
 
-    # Breakout filter: 25-day SMA breaking above 20-day high
-    if row['SMA25'] <= prev_row['High20']:
+    # Breakout filter: Price breaking above 20-day high
+    # Compare current Close to previous day's 20-day high
+    if row['Close'] <= prev_row['High20']:
         return None
 
     # ADX filter: stronger trend requirement
