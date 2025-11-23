@@ -66,16 +66,17 @@ def check_signal(ticker: str, row: pd.Series, prev_row: pd.Series, df: pd.DataFr
     if row['ADX'] < config.ADX_THRESHOLD:
         return None
 
-    # Volume surge filter (>= 1.2× 20‑day average)
+    # Volume surge filter (>= 1.0× 20‑day average)
     if row['Volume'] < row['VolumeSMA20'] * config.VOLUME_MULTIPLIER:
         return None
 
     # Support analysis: price should be within 5% above the 60‑day low
-    recent_60d = df.tail(60)
-    support_level = recent_60d['Low'].min()
-    price_to_support_ratio = (row['Close'] - support_level) / support_level
-    if price_to_support_ratio > 0.05:
-        return None
+    # recent_60d = df.tail(60)
+    # support_level = recent_60d['Low'].min()
+    # price_to_support_ratio = (row['Close'] - support_level) / support_level
+    # if price_to_support_ratio > 0.05:
+    #     return None
+    support_level = df.tail(60)['Low'].min() # Keep calculation for info, but remove filter
 
     # --- Pricing Logic (ATR‑based) ---
     # Entry price: current close discounted by ENTRY_DISCOUNT_PCT

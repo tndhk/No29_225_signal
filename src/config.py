@@ -5,12 +5,12 @@ RSI_UPPER = 50                # RSI upper bound (not overheated) - RELAXED
 MA_SHORT = 25                 # Short-term Moving Average
 MA_LONG = 75                  # Long-term Moving Average
 ADX_THRESHOLD = 20            # Minimum ADX for trend strength - RELAXED
-VOLUME_MULTIPLIER = 1.1       # Volume must be 1.1x of 20-day average - RELAXED
+VOLUME_MULTIPLIER = 1.0       # Volume must be 1.0x of 20-day average - RELAXED
 
 # Pricing Logic Constants (ATR-based)
 ENTRY_DISCOUNT_PCT = 0.02     # Entry price discount from current price (2%)
-ATR_MULTIPLIER_TP = 1.5       # Take Profit: ATR * 1.5 - OPTIMIZED
-ATR_MULTIPLIER_SL = 1.5       # Stop Loss: ATR * 1.5 - OPTIMIZED
+ATR_MULTIPLIER_TP = 2.0       # Take Profit: ATR * 2.0 - OPTIMIZED
+ATR_MULTIPLIER_SL = 1.0       # Stop Loss: ATR * 1.0 - OPTIMIZED
 
 # Legacy constants for backtest (backward compatibility)
 TP_PCT = 0.04  # Take Profit (+4%)
