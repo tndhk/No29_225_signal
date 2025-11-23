@@ -10,7 +10,7 @@ venv/
 .idea/
 
 # Project specific
-recommendations_*.csv
+recommendations/full_analysis*
 .DS_Store
 data_cache
 backtest_results
