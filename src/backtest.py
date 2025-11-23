@@ -1,4 +1,5 @@
 import pandas as pd
+import pandas_ta as ta
 from tqdm import tqdm
 import datetime
 from typing import List, Dict, Any
@@ -16,6 +17,15 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     if refresh:
         print("(Cache refresh enabled - fetching fresh data)")
     print(f"Investment per Trade: {investment_per_trade:,.0f} JPY")
+
+    # Fetch Market Data (Nikkei 225) for Trend Filter
+    print("Fetching Market Data (^N225)...")
+    market_df = data_loader.fetch_daily_data("^N225", period=BACKTEST_PERIOD, refresh=refresh)
+    if market_df is not None:
+        market_df['SMA75'] = ta.sma(market_df['Close'], length=75)
+        print("Market Data Loaded.")
+    else:
+        print("Warning: Could not load Market Data. Market filter disabled.")
 
     tickers = data_loader.get_prime_tickers()
     trades = []
@@ -103,6 +113,23 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
                 continue
 
             # --- Look for New Signal ---
+            # Market Filter: Check if Nikkei 225 is uptrending (Close > SMA75)
+            market_ok = True
+            if market_df is not None:
+                # Find market data for current_date
+                # Use asof to handle potential holiday mismatches or timezone diffs
+                try:
+                    if current_date in market_df.index:
+                        market_row = market_df.loc[current_date]
+                        if not pd.isna(market_row['SMA75']):
+                            if market_row['Close'] < market_row['SMA75']:
+                                market_ok = False
+                except KeyError:
+                    pass # Data missing for this date, assume OK or skip? Assume OK to be safe.
+            
+            if not market_ok:
+                continue
+
             signal = screener.check_signal(ticker, row, prev_row, df)
             if signal:
                 # Check if entry is triggered on next day
