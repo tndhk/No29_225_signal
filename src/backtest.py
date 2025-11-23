@@ -50,12 +50,14 @@ def run_backtest():
                 # Conservative Logic: Check SL first
                 # If Low hits SL -> Loss
                 if low <= active_trade['sl_price']:
+                    exit_price = active_trade['sl_price']
+                    profit_pct = (exit_price - active_trade['entry_price']) / active_trade['entry_price']
                     trades.append({
                         "ticker": ticker,
                         "entry_date": active_trade['entry_date'],
                         "exit_date": next_date,
                         "result": "LOSS",
-                        "profit_pct": -config.SL_PCT,
+                        "profit_pct": profit_pct,
                         "exit_reason": "SL"
                     })
                     active_trade = None
@@ -63,12 +65,14 @@ def run_backtest():
                 
                 # If High hits TP -> Win
                 if high >= active_trade['tp_price']:
+                    exit_price = active_trade['tp_price']
+                    profit_pct = (exit_price - active_trade['entry_price']) / active_trade['entry_price']
                     trades.append({
                         "ticker": ticker,
                         "entry_date": active_trade['entry_date'],
                         "exit_date": next_date,
                         "result": "WIN",
-                        "profit_pct": config.TP_PCT,
+                        "profit_pct": profit_pct,
                         "exit_reason": "TP"
                     })
                     active_trade = None
