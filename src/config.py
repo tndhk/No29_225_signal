@@ -12,6 +12,10 @@ ENTRY_DISCOUNT_PCT = 0.02     # Entry price discount from current price (2%)
 ATR_MULTIPLIER_TP = 2.0       # Take Profit: ATR * 2.0
 ATR_MULTIPLIER_SL = 1.0       # Stop Loss: ATR * 1.0
 
+# Legacy constants for backtest (backward compatibility)
+TP_PCT = 0.04  # Take Profit (+4%)
+SL_PCT = 0.02  # Stop Loss (-2%)
+
 # Data Fetching
 DATE_RANGE = "1y"  # Fetch last 1 year of data
 

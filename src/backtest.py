@@ -94,7 +94,7 @@ def run_backtest():
                 continue
 
             # --- Look for New Signal ---
-            signal = screener.check_signal(ticker, row, prev_row)
+            signal = screener.check_signal(ticker, row, prev_row, df)
             if signal:
                 # Check if entry is triggered on next day
                 # Entry condition: Low <= Entry Price
