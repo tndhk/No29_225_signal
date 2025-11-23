@@ -100,7 +100,9 @@ def main(refresh: bool = False, strategies: list = None):
         print(display_df.to_markdown(index=False))
 
     # Save to CSV (all strategies combined)
-    filename = f"recommendations_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+    output_dir = os.path.join(os.path.dirname(__file__), '..', 'recommendations')
+    os.makedirs(output_dir, exist_ok=True)
+    filename = os.path.join(output_dir, f"recommendations_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
     results_df.to_csv(filename, index=False, encoding='utf-8-sig')
     print(f"\n✅ All results saved to {filename}")
     print(f"Total signals: {len(results_df)}")
