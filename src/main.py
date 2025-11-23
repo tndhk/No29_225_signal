@@ -2,19 +2,22 @@ import pandas as pd
 from tqdm import tqdm
 import datetime
 import os
+import argparse
 from . import config, data_loader, screener
 
-def main():
+def main(refresh: bool = False):
     print("=== Overnight Dip Sniper ===")
     print(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d')}")
+    if refresh:
+        print("(Cache refresh enabled - fetching fresh data)")
     print("Fetching and analyzing data...")
-    
+
     tickers = data_loader.get_prime_tickers()
     results = []
-    
+
     # Iterate with progress bar
     for ticker in tqdm(tickers):
-        df = data_loader.fetch_daily_data(ticker, period=config.DATE_RANGE)
+        df = data_loader.fetch_daily_data(ticker, period=config.DATE_RANGE, refresh=refresh)
         if df is not None:
             result = screener.analyze_stock(ticker, df)
             if result:
@@ -47,4 +50,8 @@ def main():
     print(f"\nSaved results to {filename}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run daily analysis with optional cache refresh")
+    parser.add_argument("--refresh", action="store_true", help="Force refresh all data from API (ignore cache)")
+    args = parser.parse_args()
+
+    main(refresh=args.refresh)

@@ -2,6 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 import datetime
 from typing import List, Dict, Any
+import argparse
 from . import config, data_loader, screener
 import os
 
@@ -9,15 +10,17 @@ import os
 BACKTEST_PERIOD = "2y" # Fetch 2 years
 TIME_STOP_DAYS = 3
 
-def run_backtest():
+def run_backtest(refresh: bool = False):
     print("=== Overnight Dip Sniper: Backtest Mode ===")
     print(f"Period: {BACKTEST_PERIOD}")
-    
+    if refresh:
+        print("(Cache refresh enabled - fetching fresh data)")
+
     tickers = data_loader.get_prime_tickers()
     trades = []
-    
+
     for ticker in tqdm(tickers):
-        df = data_loader.fetch_daily_data(ticker, period=BACKTEST_PERIOD)
+        df = data_loader.fetch_daily_data(ticker, period=BACKTEST_PERIOD, refresh=refresh)
         if df is None or len(df) < 100:
             continue
             
@@ -144,4 +147,8 @@ def run_backtest():
     print(f"Detailed logs saved to {filename}")
 
 if __name__ == "__main__":
-    run_backtest()
+    parser = argparse.ArgumentParser(description="Run backtest with optional cache refresh")
+    parser.add_argument("--refresh", action="store_true", help="Force refresh all data from API (ignore cache)")
+    args = parser.parse_args()
+
+    run_backtest(refresh=args.refresh)
