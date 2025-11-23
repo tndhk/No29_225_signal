@@ -3,6 +3,7 @@ from tqdm import tqdm
 import datetime
 from typing import List, Dict, Any
 from . import config, data_loader, screener
+import os
 
 # Backtest Settings
 BACKTEST_PERIOD = "2y" # Fetch 2 years
@@ -134,7 +135,11 @@ def run_backtest():
     print(f"Total Return (Simple Sum): {total_return:.2f}%")
     
     # Save to CSV
-    filename = f"backtest_results_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+    # Ensure results folder exists
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'backtest_results')
+    os.makedirs(results_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = os.path.join(results_dir, f"backtest_results_{timestamp}.csv")
     df_trades.to_csv(filename, index=False)
     print(f"Detailed logs saved to {filename}")
 

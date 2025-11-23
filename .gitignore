@@ -11,5 +11,5 @@ venv/
 
 # Project specific
 recommendations_*.csv
-backtest_results_*.csv
+backtest_results/
 .DS_Store
