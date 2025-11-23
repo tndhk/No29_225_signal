@@ -81,6 +81,21 @@ def main(refresh: bool = False, strategies: list = None):
         display_df = strategy_df[display_cols].copy()
         display_df.columns = col_names
 
+        # Sort by Risk/Reward Ratio (descending) and ADX (descending) if available
+        sort_cols = []
+        ascending_opts = []
+        
+        if "R/R比" in display_df.columns:
+            sort_cols.append("R/R比")
+            ascending_opts.append(False)
+        
+        if "ADX" in display_df.columns:
+            sort_cols.append("ADX")
+            ascending_opts.append(False)
+            
+        if sort_cols:
+            display_df = display_df.sort_values(by=sort_cols, ascending=ascending_opts)
+
         # Display to console
         print(display_df.to_markdown(index=False))
 
