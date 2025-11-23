@@ -1,15 +1,60 @@
 import pandas as pd
-import pandas_ta as ta
 from tqdm import tqdm
 import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import argparse
 from . import config, data_loader, screener
+from . import indicators as ta
 import os
 from itertools import combinations
 
 # Backtest Settings
 BACKTEST_PERIOD = "2y" # Fetch 2 years
+
+
+def _calculate_trade_metrics(df_trades: pd.DataFrame, investment_per_trade: int) -> Dict[str, Any]:
+    """Calculate trade metrics from trades DataFrame.
+
+    Args:
+        df_trades: DataFrame containing trade results
+        investment_per_trade: Investment amount per trade in JPY
+
+    Returns:
+        Dictionary containing calculated metrics
+    """
+    if len(df_trades) == 0:
+        return None
+
+    total_trades = len(df_trades)
+    wins = len(df_trades[df_trades['profit_pct'] > 0])
+    losses = total_trades - wins
+    win_rate = wins / total_trades * 100 if total_trades > 0 else 0
+    avg_profit = df_trades['profit_pct'].mean() * 100
+    total_return = df_trades['profit_pct'].sum() * 100
+
+    # Calculate profit amounts
+    if 'profit_amount' not in df_trades.columns:
+        df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
+
+    total_profit = df_trades['profit_amount'].sum()
+
+    # Win/Loss analysis
+    wins_df = df_trades[df_trades['result'] == 'WIN']
+    losses_df = df_trades[df_trades['result'] == 'LOSS']
+    total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
+    total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
+    profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
+
+    return {
+        'total_trades': total_trades,
+        'wins': wins,
+        'losses': losses,
+        'win_rate': win_rate,
+        'avg_profit': avg_profit,
+        'total_return': total_return,
+        'total_profit': total_profit,
+        'profit_factor': profit_factor
+    }
 
 
 def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000,
@@ -278,6 +323,36 @@ def print_backtest_results(df_trades: pd.DataFrame, investment_per_trade: int, s
         print(f"  Profit Factor: {strat_profit_factor:.2f}x")
 
 
+def _test_strategy_combination(strategies: List[str], refresh: bool, investment_per_trade: int,
+                               verbose: bool = True) -> Optional[Dict[str, Any]]:
+    """Test a single strategy combination and return metrics.
+
+    Args:
+        strategies: List of strategy names to test
+        refresh: Force refresh data from API
+        investment_per_trade: Investment amount per trade
+        verbose: Print detailed output
+
+    Returns:
+        Dictionary with strategy combination metrics, or None if no trades
+    """
+    combo_name = ' + '.join(strategies)
+    print(f"\n>>> Testing {'Strategy' if len(strategies) == 1 else 'Combination'}: [{combo_name.upper()}]")
+
+    df_trades = run_backtest(refresh=refresh, investment_per_trade=investment_per_trade,
+                             strategies=strategies, verbose=verbose)
+
+    if len(df_trades) == 0:
+        return None
+
+    metrics = _calculate_trade_metrics(df_trades, investment_per_trade)
+    if metrics:
+        metrics['strategies'] = combo_name if len(strategies) > 1 else strategies[0]
+        return metrics
+
+    return None
+
+
 def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     """Run backtest for all possible strategy combinations and compare results."""
 
@@ -298,35 +373,9 @@ def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 
     print("="*80)
 
     for strategy in all_strategies:
-        print(f"\n>>> Testing Strategy: [{strategy.upper()}]")
-        df_trades = run_backtest(refresh=refresh, investment_per_trade=investment_per_trade,
-                                 strategies=[strategy], verbose=True)
-
-        if len(df_trades) > 0:
-            total_trades = len(df_trades)
-            win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
-            avg_profit = df_trades['profit_pct'].mean() * 100
-            total_return = df_trades['profit_pct'].sum() * 100
-            
-            if 'profit_amount' not in df_trades.columns:
-                 df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
-            total_profit = df_trades['profit_amount'].sum()
-
-            wins_df = df_trades[df_trades['result'] == 'WIN']
-            losses_df = df_trades[df_trades['result'] == 'LOSS']
-            total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
-            total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
-            profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
-
-            results_summary.append({
-                'strategies': strategy,
-                'total_trades': total_trades,
-                'win_rate': win_rate,
-                'avg_profit': avg_profit,
-                'total_return': total_return,
-                'total_profit': total_profit,
-                'profit_factor': profit_factor
-            })
+        metrics = _test_strategy_combination([strategy], refresh, investment_per_trade, verbose=True)
+        if metrics:
+            results_summary.append(metrics)
 
     # Test 2-strategy combinations
     print("\n" + "="*80)
@@ -335,74 +384,18 @@ def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 
 
     for combo in combinations(all_strategies, 2):
         combo_list = list(combo)
-        combo_name = ' + '.join(combo_list)
-        print(f"\n>>> Testing Combination: [{combo_name.upper()}]")
-
-        df_trades = run_backtest(refresh=False, investment_per_trade=investment_per_trade,
-                                 strategies=combo_list, verbose=True)
-
-        if len(df_trades) > 0:
-            total_trades = len(df_trades)
-            win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
-            avg_profit = df_trades['profit_pct'].mean() * 100
-            total_return = df_trades['profit_pct'].sum() * 100
-            
-            if 'profit_amount' not in df_trades.columns:
-                 df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
-            total_profit = df_trades['profit_amount'].sum()
-
-            wins_df = df_trades[df_trades['result'] == 'WIN']
-            losses_df = df_trades[df_trades['result'] == 'LOSS']
-            total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
-            total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
-            profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
-
-            results_summary.append({
-                'strategies': combo_name,
-                'total_trades': total_trades,
-                'win_rate': win_rate,
-                'avg_profit': avg_profit,
-                'total_return': total_return,
-                'total_profit': total_profit,
-                'profit_factor': profit_factor
-            })
+        metrics = _test_strategy_combination(combo_list, False, investment_per_trade, verbose=True)
+        if metrics:
+            results_summary.append(metrics)
 
     # Test all 3 strategies combined
     print("\n" + "="*80)
     print("TESTING ALL 3 STRATEGIES COMBINED")
     print("="*80)
 
-    combo_name = ' + '.join(all_strategies)
-    print(f"\n>>> Testing Combination: [{combo_name.upper()}]")
-
-    df_trades = run_backtest(refresh=False, investment_per_trade=investment_per_trade,
-                             strategies=all_strategies, verbose=True)
-
-    if len(df_trades) > 0:
-        total_trades = len(df_trades)
-        win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
-        avg_profit = df_trades['profit_pct'].mean() * 100
-        total_return = df_trades['profit_pct'].sum() * 100
-        
-        if 'profit_amount' not in df_trades.columns:
-             df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
-        total_profit = df_trades['profit_amount'].sum()
-
-        wins_df = df_trades[df_trades['result'] == 'WIN']
-        losses_df = df_trades[df_trades['result'] == 'LOSS']
-        total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
-        total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
-        profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
-
-        results_summary.append({
-            'strategies': combo_name,
-            'total_trades': total_trades,
-            'win_rate': win_rate,
-            'avg_profit': avg_profit,
-            'total_return': total_return,
-            'total_profit': total_profit,
-            'profit_factor': profit_factor
-        })
+    metrics = _test_strategy_combination(all_strategies, False, investment_per_trade, verbose=True)
+    if metrics:
+        results_summary.append(metrics)
 
     # Print Summary Comparison
     print("\n" + "="*80)

@@ -1,7 +1,52 @@
 import pandas as pd
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from . import config
 from . import indicators as ta
+
+
+def _check_basic_filters(row: pd.Series) -> bool:
+    """Check basic filters common to all strategies.
+
+    Args:
+        row: Current day data
+
+    Returns:
+        True if all basic filters pass, False otherwise
+    """
+    # Liquidity filter (5-day avg turnover)
+    if row['AvgTurnover5'] < config.MIN_TURNOVER:
+        return False
+
+    # Long-term trend: price above 75-day SMA
+    if row['Close'] <= row['SMA75']:
+        return False
+
+    return True
+
+
+def _calculate_entry_prices(row: pd.Series, atr_tp_multiplier: float,
+                            atr_sl_multiplier: float) -> Tuple[int, int, int, float]:
+    """Calculate entry, TP, SL prices and R/R ratio.
+
+    Args:
+        row: Current day data
+        atr_tp_multiplier: ATR multiplier for take profit
+        atr_sl_multiplier: ATR multiplier for stop loss
+
+    Returns:
+        Tuple of (entry_price, tp_price, sl_price, rr_ratio)
+    """
+    entry_price = int(row['Close'] * (1 - config.ENTRY_DISCOUNT_PCT))
+    atr_value = row['ATR14']
+
+    tp_price = int(entry_price + atr_value * atr_tp_multiplier)
+    sl_price = int(entry_price - atr_value * atr_sl_multiplier)
+
+    risk = entry_price - sl_price
+    reward = tp_price - entry_price
+    rr_ratio = reward / risk if risk > 0 else 0
+
+    return entry_price, tp_price, sl_price, rr_ratio
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -77,15 +122,11 @@ def check_signal_original(ticker: str, row: pd.Series, prev_row: pd.Series, df: 
         return None
 
     # --- Screening Logic ---
-    # Liquidity filter (5‑day avg turnover)
-    if row['AvgTurnover5'] < config.MIN_TURNOVER:
+    # Basic filters (liquidity, long-term trend)
+    if not _check_basic_filters(row):
         return None
 
-    # Long‑term trend: price above 75‑day SMA
-    if row['Close'] <= row['SMA75']:
-        return None
-
-    # Medium‑term trend: 25‑day SMA must be rising
+    # Medium-term trend: 25-day SMA must be rising
     if row['SMA25'] <= prev_row['SMA25']:
         return None
 
@@ -97,24 +138,16 @@ def check_signal_original(ticker: str, row: pd.Series, prev_row: pd.Series, df: 
     if row['ADX'] < config.ADX_THRESHOLD:
         return None
 
-    # Volume surge filter (>= 1.0× 20‑day average)
+    # Volume surge filter (>= 1.0× 20-day average)
     if row['Volume'] < row['VolumeSMA20'] * config.VOLUME_MULTIPLIER:
         return None
 
-    support_level = df.tail(60)['Low'].min() # Keep calculation for info
+    support_level = df.tail(60)['Low'].min()  # Keep calculation for info
 
-    # --- Pricing Logic (ATR‑based) ---
-    entry_price = int(row['Close'] * (1 - config.ENTRY_DISCOUNT_PCT))
-
-    # Take Profit and Stop Loss based on ATR
-    atr_value = row['ATR14']
-    tp_price = int(entry_price + atr_value * config.ATR_MULTIPLIER_TP)
-    sl_price = int(entry_price - atr_value * config.ATR_MULTIPLIER_SL)
-
-    # Risk/Reward ratio
-    risk = entry_price - sl_price
-    reward = tp_price - entry_price
-    rr_ratio = reward / risk if risk > 0 else 0
+    # --- Pricing Logic (ATR-based) ---
+    entry_price, tp_price, sl_price, rr_ratio = _calculate_entry_prices(
+        row, config.ATR_MULTIPLIER_TP, config.ATR_MULTIPLIER_SL
+    )
 
     return {
         "ticker": ticker,
@@ -127,7 +160,7 @@ def check_signal_original(ticker: str, row: pd.Series, prev_row: pd.Series, df: 
         "time_stop_days": config.TIME_STOP_DAYS_ORIGINAL,
         "rsi": round(row['RSI14'], 2),
         "adx": round(row['ADX'], 2),
-        "atr": int(atr_value),
+        "atr": int(row['ATR14']),
         "rr_ratio": round(rr_ratio, 2),
         "sma25": int(row['SMA25']),
         "sma75": int(row['SMA75']),
@@ -151,19 +184,15 @@ def check_signal_momentum_breakout(ticker: str, row: pd.Series, prev_row: pd.Ser
     if pd.isna(row['SMA75']) or pd.isna(row['BB_Upper']) or pd.isna(prev_row['High20']):
         return None
 
-    # Liquidity filter
-    if row['AvgTurnover5'] < config.MIN_TURNOVER:
-        return None
-
-    # Long-term trend: price above 75-day SMA
-    if row['Close'] <= row['SMA75']:
+    # Basic filters (liquidity, long-term trend)
+    if not _check_basic_filters(row):
         return None
 
     # Perfect Order filter: SMA25 > SMA75 (confirming strong uptrend)
     if row['SMA25'] <= row['SMA75']:
         return None
 
-    # Medium-term trend: 25-day SMA must be rising
+    # RSI filter (60-80 for strong momentum)
     if not (config.STRATEGY_A_RSI_LOWER <= row['RSI14'] < config.STRATEGY_A_RSI_UPPER):
         return None
 
@@ -184,16 +213,10 @@ def check_signal_momentum_breakout(ticker: str, row: pd.Series, prev_row: pd.Ser
     if row['Close'] <= row['BB_Upper']:
         return None
 
-    # --- Pricing Logic ---
-    entry_price = int(row['Close'] * (1 - config.ENTRY_DISCOUNT_PCT))
-
-    atr_value = row['ATR14']
-    tp_price = int(entry_price + atr_value * config.STRATEGY_A_ATR_MULTIPLIER_TP)
-    sl_price = int(entry_price - atr_value * config.STRATEGY_A_ATR_MULTIPLIER_SL)
-
-    risk = entry_price - sl_price
-    reward = tp_price - entry_price
-    rr_ratio = reward / risk if risk > 0 else 0
+    # --- Pricing Logic (ATR-based) ---
+    entry_price, tp_price, sl_price, rr_ratio = _calculate_entry_prices(
+        row, config.STRATEGY_A_ATR_MULTIPLIER_TP, config.STRATEGY_A_ATR_MULTIPLIER_SL
+    )
 
     return {
         "ticker": ticker,
@@ -206,7 +229,7 @@ def check_signal_momentum_breakout(ticker: str, row: pd.Series, prev_row: pd.Ser
         "time_stop_days": config.STRATEGY_A_TIME_STOP_DAYS,
         "rsi": round(row['RSI14'], 2),
         "adx": round(row['ADX'], 2),
-        "atr": int(atr_value),
+        "atr": int(row['ATR14']),
         "rr_ratio": round(rr_ratio, 2),
         "sma25": int(row['SMA25']),
         "sma75": int(row['SMA75']),
@@ -231,15 +254,11 @@ def check_signal_volume_climax(ticker: str, row: pd.Series, prev_row: pd.Series,
     if pd.isna(row['SMA75']) or pd.isna(row['Low60']) or pd.isna(row['MACD_Hist']) or pd.isna(prev_row['MACD_Hist']):
         return None
 
-    # Liquidity filter
-    if row['AvgTurnover5'] < config.MIN_TURNOVER:
+    # Basic filters (liquidity, long-term trend)
+    if not _check_basic_filters(row):
         return None
 
-    # Long-term trend: price above 75-day SMA (trend intact)
-    if row['Close'] <= row['SMA75']:
-        return None
-
-    # RSI filter: extreme oversold (< 20)
+    # RSI filter: extreme oversold (< 30)
     if row['RSI14'] >= config.STRATEGY_B_RSI_THRESHOLD:
         return None
 
@@ -247,7 +266,7 @@ def check_signal_volume_climax(ticker: str, row: pd.Series, prev_row: pd.Series,
     if row['Volume'] < row['VolumeSMA20'] * config.STRATEGY_B_VOLUME_MULTIPLIER:
         return None
 
-    # Price near 60-day low (within 2%)
+    # Price near 60-day low (within 10%)
     price_to_low_ratio = (row['Close'] - row['Low60']) / row['Low60']
     if price_to_low_ratio > config.STRATEGY_B_PRICE_TO_LOW_PCT:
         return None
@@ -260,16 +279,10 @@ def check_signal_volume_climax(ticker: str, row: pd.Series, prev_row: pd.Series,
     if row['Close'] <= row['Open']:
         return None
 
-    # --- Pricing Logic ---
-    entry_price = int(row['Close'] * (1 - config.ENTRY_DISCOUNT_PCT))
-
-    atr_value = row['ATR14']
-    tp_price = int(entry_price + atr_value * config.STRATEGY_B_ATR_MULTIPLIER_TP)
-    sl_price = int(entry_price - atr_value * config.STRATEGY_B_ATR_MULTIPLIER_SL)
-
-    risk = entry_price - sl_price
-    reward = tp_price - entry_price
-    rr_ratio = reward / risk if risk > 0 else 0
+    # --- Pricing Logic (ATR-based) ---
+    entry_price, tp_price, sl_price, rr_ratio = _calculate_entry_prices(
+        row, config.STRATEGY_B_ATR_MULTIPLIER_TP, config.STRATEGY_B_ATR_MULTIPLIER_SL
+    )
 
     return {
         "ticker": ticker,
@@ -282,7 +295,7 @@ def check_signal_volume_climax(ticker: str, row: pd.Series, prev_row: pd.Series,
         "time_stop_days": config.STRATEGY_B_TIME_STOP_DAYS,
         "rsi": round(row['RSI14'], 2),
         "adx": round(row['ADX'], 2),
-        "atr": int(atr_value),
+        "atr": int(row['ATR14']),
         "rr_ratio": round(rr_ratio, 2),
         "sma75": int(row['SMA75']),
         "low60": int(row['Low60']),

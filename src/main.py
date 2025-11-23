@@ -5,6 +5,30 @@ import os
 import argparse
 from . import config, data_loader, screener
 
+# Display column configuration for each strategy
+STRATEGY_DISPLAY_COLUMNS = {
+    'original': {
+        'columns': ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
+                   "rsi", "adx", "atr", "rr_ratio", "support"],
+        'names': ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ADX", "ATR", "R/R比", "サポート"]
+    },
+    'momentum_breakout': {
+        'columns': ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
+                   "rsi", "adx", "atr", "rr_ratio", "bb_upper", "high20"],
+        'names': ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ADX", "ATR", "R/R比", "BB上限", "20日高値"]
+    },
+    'volume_climax': {
+        'columns': ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
+                   "rsi", "atr", "rr_ratio", "low60", "macd_hist", "volume_ratio"],
+        'names': ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ATR", "R/R比", "60日安値", "MACD", "出来高倍率"]
+    }
+}
+
+# Default display columns for unknown strategies
+DEFAULT_DISPLAY_COLUMNS = ["ticker", "current_price", "entry_price", "tp_price", "sl_price"]
+DEFAULT_DISPLAY_NAMES = ["銘柄", "現在値", "指値(買)", "利確", "損切"]
+
+
 def main(refresh: bool = False, strategies: list = None):
     if strategies is None:
         strategies = config.ACTIVE_STRATEGIES
@@ -48,22 +72,10 @@ def main(refresh: bool = False, strategies: list = None):
         print(f"[{strategy.upper()}]: {len(strategy_df)} signals")
         print('='*80)
 
-        # Select columns based on strategy
-        if strategy == 'original':
-            display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
-                            "rsi", "adx", "atr", "rr_ratio", "support"]
-            col_names = ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ADX", "ATR", "R/R比", "サポート"]
-        elif strategy == 'momentum_breakout':
-            display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
-                            "rsi", "adx", "atr", "rr_ratio", "bb_upper", "high20"]
-            col_names = ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ADX", "ATR", "R/R比", "BB上限", "20日高値"]
-        elif strategy == 'volume_climax':
-            display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
-                            "rsi", "atr", "rr_ratio", "low60", "macd_hist", "volume_ratio"]
-            col_names = ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ATR", "R/R比", "60日安値", "MACD", "出来高倍率"]
-        else:
-            display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price"]
-            col_names = ["銘柄", "現在値", "指値(買)", "利確", "損切"]
+        # Select columns based on strategy configuration
+        config_data = STRATEGY_DISPLAY_COLUMNS.get(strategy, {})
+        display_cols = config_data.get('columns', DEFAULT_DISPLAY_COLUMNS)
+        col_names = config_data.get('names', DEFAULT_DISPLAY_NAMES)
 
         # Reorder and rename columns
         display_df = strategy_df[display_cols].copy()
