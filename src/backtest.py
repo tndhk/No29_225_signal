@@ -6,7 +6,7 @@ from . import config, data_loader, screener
 
 # Backtest Settings
 BACKTEST_PERIOD = "2y" # Fetch 2 years
-TIME_STOP_DAYS = 5
+TIME_STOP_DAYS = 3
 
 def run_backtest():
     print("=== Overnight Dip Sniper: Backtest Mode ===")

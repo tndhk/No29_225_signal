@@ -1,16 +1,16 @@
 # Screening Logic Constants
 MIN_TURNOVER = 1_000_000_000  # 10億円 (Daily Turnover)
-RSI_LOWER = 30                # RSI lower bound (oversold)
-RSI_UPPER = 45                # RSI upper bound (not overheated)
+RSI_LOWER = 25                # RSI lower bound (oversold) - RELAXED
+RSI_UPPER = 50                # RSI upper bound (not overheated) - RELAXED
 MA_SHORT = 25                 # Short-term Moving Average
 MA_LONG = 75                  # Long-term Moving Average
-ADX_THRESHOLD = 25            # Minimum ADX for trend strength
-VOLUME_MULTIPLIER = 1.2       # Volume must be 1.2x of 20-day average
+ADX_THRESHOLD = 20            # Minimum ADX for trend strength - RELAXED
+VOLUME_MULTIPLIER = 1.1       # Volume must be 1.1x of 20-day average - RELAXED
 
 # Pricing Logic Constants (ATR-based)
 ENTRY_DISCOUNT_PCT = 0.02     # Entry price discount from current price (2%)
-ATR_MULTIPLIER_TP = 2.0       # Take Profit: ATR * 2.0
-ATR_MULTIPLIER_SL = 1.0       # Stop Loss: ATR * 1.0
+ATR_MULTIPLIER_TP = 1.5       # Take Profit: ATR * 1.5 - OPTIMIZED
+ATR_MULTIPLIER_SL = 1.5       # Stop Loss: ATR * 1.5 - OPTIMIZED
 
 # Legacy constants for backtest (backward compatibility)
 TP_PCT = 0.04  # Take Profit (+4%)
