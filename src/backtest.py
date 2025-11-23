@@ -10,11 +10,12 @@ import os
 BACKTEST_PERIOD = "2y" # Fetch 2 years
 TIME_STOP_DAYS = 3
 
-def run_backtest(refresh: bool = False):
+def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     print("=== Overnight Dip Sniper: Backtest Mode ===")
     print(f"Period: {BACKTEST_PERIOD}")
     if refresh:
         print("(Cache refresh enabled - fetching fresh data)")
+    print(f"Investment per Trade: {investment_per_trade:,.0f} JPY")
 
     tickers = data_loader.get_prime_tickers()
     trades = []
@@ -131,12 +132,75 @@ def run_backtest(refresh: bool = False):
     avg_profit = df_trades['profit_pct'].mean() * 100
     total_return = df_trades['profit_pct'].sum() * 100
     
-    print("\n=== Backtest Results ===")
+    print("\n=== Backtest Results (Percentage) ===")
     print(f"Total Trades: {total_trades}")
     print(f"Win Rate: {win_rate:.2f}% ({wins}W / {losses}L)")
     print(f"Avg Profit per Trade: {avg_profit:.2f}%")
     print(f"Total Return (Simple Sum): {total_return:.2f}%")
-    
+
+    # Money-based analysis
+    df_trades['profit_amount'] = df_trades['profit_pct'] * investment_per_trade
+
+    total_investment = total_trades * investment_per_trade
+    total_profit = df_trades['profit_amount'].sum()
+    roi = (total_profit / total_investment * 100) if total_investment > 0 else 0
+    avg_profit_amount = df_trades['profit_amount'].mean()
+
+    wins_df = df_trades[df_trades['result'] == 'WIN']
+    losses_df = df_trades[df_trades['result'] == 'LOSS']
+
+    avg_win_amount = wins_df['profit_amount'].mean() if len(wins_df) > 0 else 0
+    avg_loss_amount = losses_df['profit_amount'].mean() if len(losses_df) > 0 else 0
+    max_win = wins_df['profit_amount'].max() if len(wins_df) > 0 else 0
+    max_loss = losses_df['profit_amount'].min() if len(losses_df) > 0 else 0
+
+    # Profit Factor
+    total_wins_amount = wins_df['profit_amount'].sum() if len(wins_df) > 0 else 0
+    total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
+    profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
+
+    print("\n=== Money-Based Analysis ===")
+    print(f"Total Investment: {total_investment:,.0f} JPY")
+    print(f"Total Profit: {total_profit:,.0f} JPY")
+    print(f"ROI: {roi:.2f}%")
+    print(f"\nAverage per Trade:")
+    print(f"  Avg Profit: {avg_profit_amount:,.0f} JPY")
+    print(f"  Avg Win: {avg_win_amount:,.0f} JPY")
+    print(f"  Avg Loss: {avg_loss_amount:,.0f} JPY")
+    print(f"\nExtreme Values:")
+    print(f"  Max Win: {max_win:,.0f} JPY")
+    print(f"  Max Loss: {max_loss:,.0f} JPY")
+    print(f"  Profit Factor: {profit_factor:.2f}x")
+
+    # Monthly breakdown
+    df_trades['entry_date'] = pd.to_datetime(df_trades['entry_date'])
+    df_trades['month'] = df_trades['entry_date'].dt.to_period('M')
+
+    monthly = df_trades.groupby('month').agg({
+        'profit_amount': ['count', 'sum'],
+        'result': lambda x: (x == 'WIN').sum()
+    })
+
+    print(f"\nMonthly Performance (Last 24 Months):")
+    for period in monthly.index[-24:]:
+        count = int(monthly.loc[period, ('profit_amount', 'count')])
+        total = monthly.loc[period, ('profit_amount', 'sum')]
+        wins_month = int(monthly.loc[period, ('result', '<lambda>')])
+        win_rate_month = wins_month / count * 100 if count > 0 else 0
+        print(f"  {period}: {count:3d} trades, {total:>12,.0f} JPY, Win: {win_rate_month:5.1f}%")
+
+    # Annual outlook
+    df_trades['year'] = df_trades['entry_date'].dt.year
+    yearly = df_trades.groupby('year')['profit_amount'].sum()
+
+    print(f"\nAnnual Outlook:")
+    for year in yearly.index:
+        print(f"  {year}: {yearly[year]:,.0f} JPY")
+
+    avg_annual = yearly.mean()
+    print(f"\nAverage Annual Profit: {avg_annual:,.0f} JPY")
+    print(f"Average Monthly Profit: {avg_annual/12:,.0f} JPY")
+
     # Save to CSV
     # Ensure results folder exists
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'backtest_results')
@@ -144,11 +208,13 @@ def run_backtest(refresh: bool = False):
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = os.path.join(results_dir, f"backtest_results_{timestamp}.csv")
     df_trades.to_csv(filename, index=False)
-    print(f"Detailed logs saved to {filename}")
+    print(f"\nDetailed logs saved to {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run backtest with optional cache refresh")
     parser.add_argument("--refresh", action="store_true", help="Force refresh all data from API (ignore cache)")
+    parser.add_argument("--investment", type=int, default=1_000_000,
+                        help="Investment amount per trade in JPY (default: 1,000,000)")
     args = parser.parse_args()
 
-    run_backtest(refresh=args.refresh)
+    run_backtest(refresh=args.refresh, investment_per_trade=args.investment)
