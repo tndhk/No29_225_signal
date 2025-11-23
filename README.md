@@ -35,7 +35,6 @@
 - **価格が20日高値をブレイク**（新高値更新）
 - ADX ≥ 30（非常に強いトレンド）
 - 出来高 ≥ 20日平均の1.2倍
-- 価格がボリンジャーバンド上限突破
 - 流動性: 売買代金10億円以上
 
 **エグジット条件**:
@@ -73,12 +72,12 @@
 直近2年間のバックテスト結果（単利運用）：
 
 | 戦略組み合わせ | トレード数 | 勝率 | 総リターン | Profit Factor |
-|----------------|-----------|------|------------|---------------|
-| **Original + Momentum** 🏆 | **473回** | **45.0%** | **+83.4%** | **1.14** |
+|---------------------------------|-----------|------|------------|---------------|
+| **Original + Momentum Breakout + Volume Climax** 🏆 | **592回** | **45.10%** | **+122.14%** | **1.15** |
 | Original 単独 | 331回 | 44.7% | +77.0% | 1.18 |
 | Momentum 単独 | 142回 | 45.8% | +6.4% | 1.03 |
 
-**結論**: オリジナル戦略にモメンタム戦略を加えることで、リスク（ドローダウン）を大きく増やすことなく、純利益を上積みすることに成功しています。
+**結論**: オリジナル戦略にモメンタム戦略とボリュームクライマックス戦略を加えることで、ポートフォリオ全体の収益率と安定性を向上させることに成功しています。特に「Original + Momentum Breakout + Volume Climax」の組み合わせが最高のパフォーマンスを示しました。
 
 ---
 
@@ -101,19 +100,29 @@
 
 ## 💻 使い方
 
-### **1. 日次スクリーニング（シグナル検出）**
+### **1. 日次スクリーニング（シグナル検出 & 発注指示書生成）**
 
-デフォルト設定では、**Original** と **Momentum Breakout** の2つの戦略が有効化されています。
+デフォルトでは `config.py` で指定された `ACTIVE_STRATEGIES` （初期設定では全戦略）と予算100万円で実行されます。
+R/R比とADXが高い順にソートされた「発注指示書」が生成され、予算内で購入可能な銘柄の具体的な発注情報が表示・保存されます。
 
 ```bash
-# デフォルト戦略でスクリーニング
+# デフォルト設定で実行 (config.ACTIVE_STRATEGIES, 予算100万円)
 python -m src.main
 
-# 特定の戦略のみ使用
+# 特定の戦略のみ使用 (例: original戦略のみ)
 python -m src.main --strategies original
+
+# 予算を指定して実行 (例: 50万円)
+python -m src.main --budget 500000
+
+# 特定の戦略と予算を指定して実行
+python -m src.main --strategies original momentum_breakout --budget 2000000
 ```
 
-**出力**: `recommendations_YYYYMMDD.csv` に推奨銘柄リストが保存されます。
+**出力**:
+- コンソールに日次での「発注指示書」が表示されます。
+- `recommendations/orders_YYYYMMDD.csv` に、発注指示書と同じ内容のCSVファイルが保存されます。
+- `recommendations/full_analysis_YYYYMMDD.csv` に、すべてのシグナルの詳細な分析データが保存されます。
 
 ---
 
@@ -129,8 +138,11 @@ python -m src.backtest --compare
 
 #### **条件指定バックテスト**
 ```bash
-# 特定の戦略のみテスト
+# 特定の戦略のみテスト (例: originalとmomentum_breakoutの組み合わせ)
 python -m src.backtest --strategies original momentum_breakout
+
+# 全戦略を組み合わせてテスト (詳細な月別・年別パフォーマンスも表示)
+python -m src.backtest --strategies all
 
 # 投資額の変更（デフォルト: 100万円/トレード）
 python -m src.backtest --strategies all --investment 5000000
@@ -145,21 +157,28 @@ python -m src.backtest --strategies all --investment 5000000
 ### **戦略選択**
 ```python
 # デフォルトで使用する戦略
-ACTIVE_STRATEGIES = ['original', 'momentum_breakout']
+ACTIVE_STRATEGIES = ['original', 'momentum_breakout', 'volume_climax']
 ```
 
 ### **銘柄リスト**
-日経225構成銘柄に加え、JPX400採用銘柄や大型株を中心に約330銘柄を監視対象としています。
+日経225構成銘柄に加え、JPX400採用銘柄や大型株を中心に約560銘柄を監視対象としています。
 
 ---
 
 ## 📝 更新履歴
 
-### **v3.1 (2025/11) - 戦略最適化** ✨
+### **v3.2 (2025/11) - 発注指示書 & 予算管理機能** ✨
+- 日次スクリーニング結果から、予算を考慮した具体的な「発注指示書」を生成する機能を追加。
+- コマンドライン引数 `--budget` で運用予算を動的に指定可能に。
+- 出力ファイルを `orders_YYYYMMDD.csv` (発注指示書) と `full_analysis_YYYYMMDD.csv` (詳細分析) に分割。
+- `main.py` のコンソール出力を簡素化し、発注指示書を優先的に表示。
+
+### **v3.1 (2025/11) - 戦略最適化 & レポート強化** ✨
 - Momentum Breakout戦略のロジック改善（価格ブレイクアウト、ADX強化、短期決済化）
 - Volume Climax戦略の条件緩和
-- デフォルト戦略を「Original + Momentum」のハイブリッド構成に変更
-- 監視銘柄数を約330銘柄へ拡大
+- デフォルト戦略を「Original + Momentum Breakout + Volume Climax」のハイブリッド構成に変更
+- 監視銘柄数を約560銘柄へ拡大
+- バックテスト結果に月別・年別パフォーマンスの表示を追加
 
 ### **v3.0 (2025) - マルチ戦略システム** 🚀
 - 2つの新戦略を追加（モメンタムブレイクアウト、ボリュームクライマックス）
