@@ -1,4 +1,12 @@
-# Screening Logic Constants
+# ========================================
+# STRATEGY SELECTION
+# ========================================
+# Available strategies: 'original', 'momentum_breakout', 'volume_climax', 'all'
+ACTIVE_STRATEGIES = ['original']  # List of strategies to use
+
+# ========================================
+# ORIGINAL STRATEGY: "Overnight Dip Sniper"
+# ========================================
 MIN_TURNOVER = 1_000_000_000  # 10億円 (Daily Turnover)
 RSI_LOWER = 25                # RSI lower bound (oversold) - RELAXED
 RSI_UPPER = 50                # RSI upper bound (not overheated) - RELAXED
@@ -11,6 +19,35 @@ VOLUME_MULTIPLIER = 1.0       # Volume must be 1.0x of 20-day average - RELAXED
 ENTRY_DISCOUNT_PCT = 0.02     # Entry price discount from current price (2%)
 ATR_MULTIPLIER_TP = 2.0       # Take Profit: ATR * 2.0 - OPTIMIZED
 ATR_MULTIPLIER_SL = 1.0       # Stop Loss: ATR * 1.0 - OPTIMIZED
+TIME_STOP_DAYS_ORIGINAL = 3   # Time stop for original strategy
+
+# ========================================
+# STRATEGY A: "Momentum Breakout"
+# ========================================
+STRATEGY_A_RSI_LOWER = 60     # Strong momentum (RSI > 60)
+STRATEGY_A_RSI_UPPER = 80     # Not overheated (RSI < 80)
+STRATEGY_A_ADX_THRESHOLD = 25 # Stronger trend requirement
+STRATEGY_A_VOLUME_MULTIPLIER = 1.5  # Higher volume surge
+STRATEGY_A_BB_PERIOD = 20     # Bollinger Bands period
+STRATEGY_A_BB_STD = 2.0       # Bollinger Bands standard deviation
+
+# Exit conditions for Strategy A
+STRATEGY_A_ATR_MULTIPLIER_TP = 3.0  # Take Profit: ATR * 3.0 (bigger target)
+STRATEGY_A_ATR_MULTIPLIER_SL = 1.5  # Stop Loss: ATR * 1.5 (wider stop)
+STRATEGY_A_TIME_STOP_DAYS = 5       # Longer holding period
+
+# ========================================
+# STRATEGY B: "Volume Climax Reversal"
+# ========================================
+STRATEGY_B_RSI_THRESHOLD = 20       # Extreme oversold (RSI < 20)
+STRATEGY_B_VOLUME_MULTIPLIER = 2.5  # Panic volume (2.5x average)
+STRATEGY_B_PRICE_TO_LOW_PCT = 0.02  # Within 2% of 60-day low
+STRATEGY_B_LOW_PERIOD = 60          # 60-day low period
+
+# Exit conditions for Strategy B
+STRATEGY_B_ATR_MULTIPLIER_TP = 2.5  # Take Profit: ATR * 2.5
+STRATEGY_B_ATR_MULTIPLIER_SL = 1.0  # Stop Loss: ATR * 1.0 (tight stop)
+STRATEGY_B_TIME_STOP_DAYS = 2       # Quick reversal trade
 
 # Legacy constants for backtest (backward compatibility)
 TP_PCT = 0.04  # Take Profit (+4%)

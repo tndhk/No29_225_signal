@@ -1,123 +1,146 @@
 import pandas as pd
-import pandas_ta as ta
 from tqdm import tqdm
 import datetime
 from typing import List, Dict, Any
 import argparse
 from . import config, data_loader, screener
+from . import indicators as ta
 import os
+from itertools import combinations
 
 # Backtest Settings
 BACKTEST_PERIOD = "2y" # Fetch 2 years
-TIME_STOP_DAYS = 3
 
-def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
-    print("=== Overnight Dip Sniper: Backtest Mode ===")
-    print(f"Period: {BACKTEST_PERIOD}")
-    if refresh:
-        print("(Cache refresh enabled - fetching fresh data)")
-    print(f"Investment per Trade: {investment_per_trade:,.0f} JPY")
+
+def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000,
+                 strategies: list = None, verbose: bool = True):
+    """Run backtest for specified strategies.
+
+    Args:
+        refresh: Force refresh data from API
+        investment_per_trade: Investment amount per trade in JPY
+        strategies: List of strategies to test (default: from config.ACTIVE_STRATEGIES)
+        verbose: Print detailed output
+
+    Returns:
+        DataFrame of all trades
+    """
+    if strategies is None:
+        strategies = config.ACTIVE_STRATEGIES
+
+    if verbose:
+        print("=== Multi-Strategy Backtest Mode ===")
+        print(f"Active Strategies: {', '.join(strategies)}")
+        print(f"Period: {BACKTEST_PERIOD}")
+        if refresh:
+            print("(Cache refresh enabled - fetching fresh data)")
+        print(f"Investment per Trade: {investment_per_trade:,.0f} JPY")
 
     # Fetch Market Data (Nikkei 225) for Trend Filter
-    print("Fetching Market Data (^N225)...")
+    if verbose:
+        print("Fetching Market Data (^N225)...")
     market_df = data_loader.fetch_daily_data("^N225", period=BACKTEST_PERIOD, refresh=refresh)
     if market_df is not None:
         market_df['SMA75'] = ta.sma(market_df['Close'], length=75)
-        print("Market Data Loaded.")
+        if verbose:
+            print("Market Data Loaded.")
     else:
-        print("Warning: Could not load Market Data. Market filter disabled.")
+        if verbose:
+            print("Warning: Could not load Market Data. Market filter disabled.")
 
     tickers = data_loader.get_prime_tickers()
     trades = []
 
-    for ticker in tqdm(tickers):
+    iterator = tqdm(tickers) if verbose else tickers
+    for ticker in iterator:
         df = data_loader.fetch_daily_data(ticker, period=BACKTEST_PERIOD, refresh=refresh)
         if df is None or len(df) < 100:
             continue
-            
+
         # Add indicators
         df = screener.add_indicators(df)
-        
+
         # Iterate through days
-        # Start from index where indicators are valid
         start_idx = config.MA_LONG + 1
-        
-        active_trade = None # {entry_price, tp, sl, entry_date, days_held}
-        
+
+        # Track active trades (one per strategy)
+        active_trades = {}  # {strategy_name: trade_dict}
+
         for i in range(start_idx, len(df) - 1):
             current_date = df.index[i]
             row = df.iloc[i]
             prev_row = df.iloc[i-1]
-            
+
             # Next day data (for execution)
             next_day = df.iloc[i+1]
             next_date = df.index[i+1]
-            
-            # --- Manage Active Trade ---
-            if active_trade:
+
+            # --- Manage Active Trades ---
+            completed_strategies = []
+            for strategy_name, active_trade in active_trades.items():
                 active_trade['days_held'] += 1
-                
+
                 # Check Exit (OHLC of next_day)
                 low = next_day['Low']
                 high = next_day['High']
                 close = next_day['Close']
-                
+
                 # Conservative Logic: Check SL first
-                # If Low hits SL -> Loss
                 if low <= active_trade['sl_price']:
                     exit_price = active_trade['sl_price']
                     profit_pct = (exit_price - active_trade['entry_price']) / active_trade['entry_price']
                     trades.append({
                         "ticker": ticker,
+                        "strategy": strategy_name,
                         "entry_date": active_trade['entry_date'],
                         "exit_date": next_date,
                         "result": "LOSS",
                         "profit_pct": profit_pct,
                         "exit_reason": "SL"
                     })
-                    active_trade = None
+                    completed_strategies.append(strategy_name)
                     continue
-                
+
                 # If High hits TP -> Win
                 if high >= active_trade['tp_price']:
                     exit_price = active_trade['tp_price']
                     profit_pct = (exit_price - active_trade['entry_price']) / active_trade['entry_price']
                     trades.append({
                         "ticker": ticker,
+                        "strategy": strategy_name,
                         "entry_date": active_trade['entry_date'],
                         "exit_date": next_date,
                         "result": "WIN",
                         "profit_pct": profit_pct,
                         "exit_reason": "TP"
                     })
-                    active_trade = None
+                    completed_strategies.append(strategy_name)
                     continue
-                
-                # Time Stop
-                if active_trade['days_held'] >= TIME_STOP_DAYS:
-                    # Force close at Close
+
+                # Time Stop (strategy-specific)
+                if active_trade['days_held'] >= active_trade['time_stop_days']:
                     exit_price = close
                     profit_pct = (exit_price - active_trade['entry_price']) / active_trade['entry_price']
                     trades.append({
                         "ticker": ticker,
+                        "strategy": strategy_name,
                         "entry_date": active_trade['entry_date'],
                         "exit_date": next_date,
                         "result": "WIN" if profit_pct > 0 else "LOSS",
                         "profit_pct": profit_pct,
                         "exit_reason": "TIME_STOP"
                     })
-                    active_trade = None
+                    completed_strategies.append(strategy_name)
                     continue
-                    
-                # If trade continues, do not look for new signals
-                continue
 
-            # --- Look for New Signal ---
-            # Market Filter: Check if Nikkei 225 is uptrending (Close > SMA75)
+            # Remove completed trades
+            for strategy_name in completed_strategies:
+                del active_trades[strategy_name]
+
+            # --- Look for New Signals ---
+            # Market Filter: Check if Nikkei 225 is uptrending
             market_ok = True
             if market_df is not None:
-                # Find market data for current_date
-                # Use asof to handle potential holiday mismatches or timezone diffs
                 try:
                     if current_date in market_df.index:
                         market_row = market_df.loc[current_date]
@@ -125,41 +148,62 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
                             if market_row['Close'] < market_row['SMA75']:
                                 market_ok = False
                 except KeyError:
-                    pass # Data missing for this date, assume OK or skip? Assume OK to be safe.
-            
+                    pass
+
             if not market_ok:
                 continue
 
-            signal = screener.check_signal(ticker, row, prev_row, df)
-            if signal:
+            # Check for signals across all strategies
+            signals = screener.check_signal(ticker, row, prev_row, df, strategies=strategies)
+
+            for signal in signals:
+                strategy_name = signal['strategy']
+
+                # Skip if already have active trade for this strategy
+                if strategy_name in active_trades:
+                    continue
+
                 # Check if entry is triggered on next day
-                # Entry condition: Low <= Entry Price
                 if next_day['Low'] <= signal['entry_price']:
                     # Trade Executed
-                    active_trade = {
+                    active_trades[strategy_name] = {
                         "entry_price": signal['entry_price'],
                         "tp_price": signal['tp_price'],
                         "sl_price": signal['sl_price'],
-                        "entry_date": next_date, # Executed on next day
+                        "time_stop_days": signal['time_stop_days'],
+                        "entry_date": next_date,
                         "days_held": 0
                     }
-    
+
     # Analyze Results
     if not trades:
-        print("No trades generated.")
-        return
+        if verbose:
+            print("No trades generated.")
+        return pd.DataFrame()
 
     df_trades = pd.DataFrame(trades)
-    
+
+    if verbose:
+        print_backtest_results(df_trades, investment_per_trade, strategies)
+
+    return df_trades
+
+
+def print_backtest_results(df_trades: pd.DataFrame, investment_per_trade: int, strategies: list):
+    """Print detailed backtest results."""
+
+    print("\n" + "="*80)
+    print("OVERALL RESULTS")
+    print("="*80)
+
     total_trades = len(df_trades)
     wins = len(df_trades[df_trades['profit_pct'] > 0])
     losses = len(df_trades[df_trades['profit_pct'] <= 0])
-    win_rate = wins / total_trades * 100
-    
+    win_rate = wins / total_trades * 100 if total_trades > 0 else 0
+
     avg_profit = df_trades['profit_pct'].mean() * 100
     total_return = df_trades['profit_pct'].sum() * 100
-    
-    print("\n=== Backtest Results (Percentage) ===")
+
     print(f"Total Trades: {total_trades}")
     print(f"Win Rate: {win_rate:.2f}% ({wins}W / {losses}L)")
     print(f"Avg Profit per Trade: {avg_profit:.2f}%")
@@ -171,7 +215,6 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     total_investment = total_trades * investment_per_trade
     total_profit = df_trades['profit_amount'].sum()
     roi = (total_profit / total_investment * 100) if total_investment > 0 else 0
-    avg_profit_amount = df_trades['profit_amount'].mean()
 
     wins_df = df_trades[df_trades['result'] == 'WIN']
     losses_df = df_trades[df_trades['result'] == 'LOSS']
@@ -186,12 +229,11 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     total_losses_amount = abs(losses_df['profit_amount'].sum()) if len(losses_df) > 0 else 1
     profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
 
-    print("\n=== Money-Based Analysis ===")
-    print(f"Total Investment: {total_investment:,.0f} JPY")
+    print(f"\nTotal Investment: {total_investment:,.0f} JPY")
     print(f"Total Profit: {total_profit:,.0f} JPY")
     print(f"ROI: {roi:.2f}%")
     print(f"\nAverage per Trade:")
-    print(f"  Avg Profit: {avg_profit_amount:,.0f} JPY")
+    print(f"  Avg Profit: {df_trades['profit_amount'].mean():,.0f} JPY")
     print(f"  Avg Win: {avg_win_amount:,.0f} JPY")
     print(f"  Avg Loss: {avg_loss_amount:,.0f} JPY")
     print(f"\nExtreme Values:")
@@ -199,49 +241,231 @@ def run_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
     print(f"  Max Loss: {max_loss:,.0f} JPY")
     print(f"  Profit Factor: {profit_factor:.2f}x")
 
-    # Monthly breakdown
-    df_trades['entry_date'] = pd.to_datetime(df_trades['entry_date'])
-    df_trades['month'] = df_trades['entry_date'].dt.to_period('M')
+    # Strategy Breakdown
+    print("\n" + "="*80)
+    print("STRATEGY BREAKDOWN")
+    print("="*80)
 
-    monthly = df_trades.groupby('month').agg({
-        'profit_amount': ['count', 'sum'],
-        'result': lambda x: (x == 'WIN').sum()
-    })
+    for strategy in strategies:
+        strategy_df = df_trades[df_trades['strategy'] == strategy]
+        if len(strategy_df) == 0:
+            print(f"\n[{strategy.upper()}]: No trades")
+            continue
 
-    print(f"\nMonthly Performance (Last 24 Months):")
-    for period in monthly.index[-24:]:
-        count = int(monthly.loc[period, ('profit_amount', 'count')])
-        total = monthly.loc[period, ('profit_amount', 'sum')]
-        wins_month = int(monthly.loc[period, ('result', '<lambda>')])
-        win_rate_month = wins_month / count * 100 if count > 0 else 0
-        print(f"  {period}: {count:3d} trades, {total:>12,.0f} JPY, Win: {win_rate_month:5.1f}%")
+        strat_total = len(strategy_df)
+        strat_wins = len(strategy_df[strategy_df['profit_pct'] > 0])
+        strat_losses = strat_total - strat_wins
+        strat_win_rate = strat_wins / strat_total * 100 if strat_total > 0 else 0
+        strat_avg_profit = strategy_df['profit_pct'].mean() * 100
+        strat_total_return = strategy_df['profit_pct'].sum() * 100
+        strat_profit_amount = strategy_df['profit_amount'].sum()
 
-    # Annual outlook
-    df_trades['year'] = df_trades['entry_date'].dt.year
-    yearly = df_trades.groupby('year')['profit_amount'].sum()
+        strat_wins_df = strategy_df[strategy_df['result'] == 'WIN']
+        strat_losses_df = strategy_df[strategy_df['result'] == 'LOSS']
+        strat_total_wins_amount = strat_wins_df['profit_amount'].sum() if len(strat_wins_df) > 0 else 0
+        strat_total_losses_amount = abs(strat_losses_df['profit_amount'].sum()) if len(strat_losses_df) > 0 else 1
+        strat_profit_factor = strat_total_wins_amount / strat_total_losses_amount if strat_total_losses_amount > 0 else 0
 
-    print(f"\nAnnual Outlook:")
-    for year in yearly.index:
-        print(f"  {year}: {yearly[year]:,.0f} JPY")
+        print(f"\n[{strategy.upper()}]")
+        print(f"  Trades: {strat_total}")
+        print(f"  Win Rate: {strat_win_rate:.2f}% ({strat_wins}W / {strat_losses}L)")
+        print(f"  Avg Profit/Trade: {strat_avg_profit:.2f}%")
+        print(f"  Total Return: {strat_total_return:.2f}%")
+        print(f"  Total Profit: {strat_profit_amount:,.0f} JPY")
+        print(f"  Profit Factor: {strat_profit_factor:.2f}x")
 
-    avg_annual = yearly.mean()
-    print(f"\nAverage Annual Profit: {avg_annual:,.0f} JPY")
-    print(f"Average Monthly Profit: {avg_annual/12:,.0f} JPY")
 
-    # Save to CSV
-    # Ensure results folder exists
+def run_combination_backtest(refresh: bool = False, investment_per_trade: int = 1_000_000):
+    """Run backtest for all possible strategy combinations and compare results."""
+
+    all_strategies = ['original', 'momentum_breakout', 'volume_climax']
+
+    print("="*80)
+    print("COMBINATION BACKTEST - Testing All Strategy Combinations")
+    print("="*80)
+    print(f"Available Strategies: {', '.join(all_strategies)}")
+    print(f"Period: {BACKTEST_PERIOD}")
+    print(f"Investment per Trade: {investment_per_trade:,.0f} JPY\n")
+
+    results_summary = []
+
+    # Test each individual strategy
+    print("\n" + "="*80)
+    print("TESTING INDIVIDUAL STRATEGIES")
+    print("="*80)
+
+    for strategy in all_strategies:
+        print(f"\n>>> Testing Strategy: [{strategy.upper()}]")
+        df_trades = run_backtest(refresh=refresh, investment_per_trade=investment_per_trade,
+                                 strategies=[strategy], verbose=True)
+
+        if len(df_trades) > 0:
+            total_trades = len(df_trades)
+            win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
+            avg_profit = df_trades['profit_pct'].mean() * 100
+            total_return = df_trades['profit_pct'].sum() * 100
+            total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+
+            wins_df = df_trades[df_trades['result'] == 'WIN']
+            losses_df = df_trades[df_trades['result'] == 'LOSS']
+            total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
+            total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+            profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
+
+            results_summary.append({
+                'strategies': strategy,
+                'total_trades': total_trades,
+                'win_rate': win_rate,
+                'avg_profit': avg_profit,
+                'total_return': total_return,
+                'total_profit': total_profit,
+                'profit_factor': profit_factor
+            })
+
+    # Test 2-strategy combinations
+    print("\n" + "="*80)
+    print("TESTING 2-STRATEGY COMBINATIONS")
+    print("="*80)
+
+    for combo in combinations(all_strategies, 2):
+        combo_list = list(combo)
+        combo_name = ' + '.join(combo_list)
+        print(f"\n>>> Testing Combination: [{combo_name.upper()}]")
+
+        df_trades = run_backtest(refresh=False, investment_per_trade=investment_per_trade,
+                                 strategies=combo_list, verbose=True)
+
+        if len(df_trades) > 0:
+            total_trades = len(df_trades)
+            win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
+            avg_profit = df_trades['profit_pct'].mean() * 100
+            total_return = df_trades['profit_pct'].sum() * 100
+            total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+
+            wins_df = df_trades[df_trades['result'] == 'WIN']
+            losses_df = df_trades[df_trades['result'] == 'LOSS']
+            total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
+            total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+            profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
+
+            results_summary.append({
+                'strategies': combo_name,
+                'total_trades': total_trades,
+                'win_rate': win_rate,
+                'avg_profit': avg_profit,
+                'total_return': total_return,
+                'total_profit': total_profit,
+                'profit_factor': profit_factor
+            })
+
+    # Test all 3 strategies combined
+    print("\n" + "="*80)
+    print("TESTING ALL 3 STRATEGIES COMBINED")
+    print("="*80)
+
+    combo_name = ' + '.join(all_strategies)
+    print(f"\n>>> Testing Combination: [{combo_name.upper()}]")
+
+    df_trades = run_backtest(refresh=False, investment_per_trade=investment_per_trade,
+                             strategies=all_strategies, verbose=True)
+
+    if len(df_trades) > 0:
+        total_trades = len(df_trades)
+        win_rate = len(df_trades[df_trades['profit_pct'] > 0]) / total_trades * 100
+        avg_profit = df_trades['profit_pct'].mean() * 100
+        total_return = df_trades['profit_pct'].sum() * 100
+        total_profit = df_trades['profit_pct'].sum() * investment_per_trade * total_trades
+
+        wins_df = df_trades[df_trades['result'] == 'WIN']
+        losses_df = df_trades[df_trades['result'] == 'LOSS']
+        total_wins_amount = wins_df['profit_pct'].sum() * investment_per_trade * len(wins_df)
+        total_losses_amount = abs(losses_df['profit_pct'].sum() * investment_per_trade * len(losses_df))
+        profit_factor = total_wins_amount / total_losses_amount if total_losses_amount > 0 else 0
+
+        results_summary.append({
+            'strategies': combo_name,
+            'total_trades': total_trades,
+            'win_rate': win_rate,
+            'avg_profit': avg_profit,
+            'total_return': total_return,
+            'total_profit': total_profit,
+            'profit_factor': profit_factor
+        })
+
+    # Print Summary Comparison
+    print("\n" + "="*80)
+    print("FINAL COMPARISON - ALL COMBINATIONS")
+    print("="*80)
+
+    df_summary = pd.DataFrame(results_summary)
+    df_summary = df_summary.sort_values('total_profit', ascending=False)
+
+    print("\nRanked by Total Profit:")
+    print("-" * 80)
+    for idx, row in df_summary.iterrows():
+        print(f"\n{row['strategies']}")
+        print(f"  Total Trades: {int(row['total_trades'])}")
+        print(f"  Win Rate: {row['win_rate']:.2f}%")
+        print(f"  Avg Profit/Trade: {row['avg_profit']:.2f}%")
+        print(f"  Total Return: {row['total_return']:.2f}%")
+        print(f"  Total Profit: {row['total_profit']:,.0f} JPY 💰")
+        print(f"  Profit Factor: {row['profit_factor']:.2f}x")
+
+    # Save summary to CSV
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'backtest_results')
     os.makedirs(results_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = os.path.join(results_dir, f"backtest_results_{timestamp}.csv")
-    df_trades.to_csv(filename, index=False)
-    print(f"\nDetailed logs saved to {filename}")
+    filename = os.path.join(results_dir, f"combination_summary_{timestamp}.csv")
+    df_summary.to_csv(filename, index=False)
+
+    print(f"\n✅ Summary saved to {filename}")
+
+    # Print the winner
+    winner = df_summary.iloc[0]
+    print("\n" + "="*80)
+    print("🏆 WINNING COMBINATION 🏆")
+    print("="*80)
+    print(f"Strategy: {winner['strategies']}")
+    print(f"Total Profit: {winner['total_profit']:,.0f} JPY")
+    print(f"Total Trades: {int(winner['total_trades'])}")
+    print(f"Win Rate: {winner['win_rate']:.2f}%")
+    print(f"Profit Factor: {winner['profit_factor']:.2f}x")
+    print("="*80)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run backtest with optional cache refresh")
+    parser = argparse.ArgumentParser(description="Run backtest with strategy selection")
     parser.add_argument("--refresh", action="store_true", help="Force refresh all data from API (ignore cache)")
     parser.add_argument("--investment", type=int, default=1_000_000,
                         help="Investment amount per trade in JPY (default: 1,000,000)")
+    parser.add_argument("--strategies", nargs='+',
+                        choices=['original', 'momentum_breakout', 'volume_climax', 'all'],
+                        help="Strategies to test (space-separated). Use 'all' for all strategies.")
+    parser.add_argument("--compare", action="store_true",
+                        help="Run combination backtest to compare all strategy combinations")
+
     args = parser.parse_args()
 
-    run_backtest(refresh=args.refresh, investment_per_trade=args.investment)
+    if args.compare:
+        # Run combination backtest
+        run_combination_backtest(refresh=args.refresh, investment_per_trade=args.investment)
+    else:
+        # Run regular backtest
+        strategies = args.strategies
+        if strategies and 'all' in strategies:
+            strategies = ['original', 'momentum_breakout', 'volume_climax']
+        elif not strategies:
+            strategies = config.ACTIVE_STRATEGIES
+
+        df_trades = run_backtest(refresh=args.refresh, investment_per_trade=args.investment,
+                                 strategies=strategies, verbose=True)
+
+        # Save detailed results
+        if len(df_trades) > 0:
+            results_dir = os.path.join(os.path.dirname(__file__), '..', 'backtest_results')
+            os.makedirs(results_dir, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            strategy_name = '_'.join(strategies)
+            filename = os.path.join(results_dir, f"backtest_{strategy_name}_{timestamp}.csv")
+            df_trades.to_csv(filename, index=False)
+            print(f"\n✅ Detailed trades saved to {filename}")
