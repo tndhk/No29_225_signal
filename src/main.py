@@ -28,13 +28,14 @@ def main():
 
     # Create DataFrame for results
     results_df = pd.DataFrame(results)
-    
+
     # Reorder columns for display
-    display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price", "rsi", "sma25"]
+    display_cols = ["ticker", "current_price", "entry_price", "tp_price", "sl_price",
+                    "rsi", "adx", "atr", "rr_ratio", "support"]
     results_df = results_df[display_cols]
-    
+
     # Rename columns for Japanese output
-    results_df.columns = ["銘柄", "現在値", "指値(買)", "利確(+4%)", "損切(-2%)", "RSI", "25MA"]
+    results_df.columns = ["銘柄", "現在値", "指値(買)", "利確", "損切", "RSI", "ADX", "ATR", "R/R比", "サポート"]
     
     # Display to console
     print("\n[推奨銘柄リスト]")
