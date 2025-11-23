@@ -28,7 +28,7 @@ STRATEGY_DISPLAY_COLUMNS = {
 DEFAULT_DISPLAY_COLUMNS = ["ticker", "current_price", "entry_price", "tp_price", "sl_price"]
 DEFAULT_DISPLAY_NAMES = ["銘柄", "現在値", "指値(買)", "利確", "損切"]
 
-def main(refresh: bool = False, strategies: list = None):
+def main(refresh: bool = False, strategies: list = None, budget: int = 1_000_000):
     if strategies is None:
         strategies = config.ACTIVE_STRATEGIES
 
@@ -63,8 +63,8 @@ def main(refresh: bool = False, strategies: list = None):
     if 'adx' not in results_df.columns:
         results_df['adx'] = 0.0
         
-    # --- GENERATE BUY ORDERS (Budget: 1,000,000 JPY) ---
-    BUDGET = 1_000_000
+    # --- GENERATE BUY ORDERS (Budget: {budget:,} JPY) ---
+    BUDGET = budget
     current_total_cost = 0
     action_plan = []
     
@@ -137,6 +137,8 @@ if __name__ == "__main__":
     parser.add_argument("--strategies", nargs='+',
                         choices=['original', 'momentum_breakout', 'volume_climax', 'all'],
                         help="Strategies to use")
+    parser.add_argument("--budget", type=int, default=1_000_000, 
+                        help="Total budget for today's trades in JPY (default: 1,000,000)")
     args = parser.parse_args()
 
     strategies = args.strategies
@@ -145,4 +147,4 @@ if __name__ == "__main__":
     elif not strategies:
         strategies = config.ACTIVE_STRATEGIES
 
-    main(refresh=args.refresh, strategies=strategies)
+    main(refresh=args.refresh, strategies=strategies, budget=args.budget)
